@@ -6,6 +6,11 @@ const App = (() => {
     let draggingColId = null;
     let dragOverTarget = null;
 
+    let currentSearchKeyword = '';
+    let currentCategory = '全部';
+    let contextMenuTemplateId = null;
+    let thumbnailGenerating = {};
+
     const STORAGE_KEY = 'email_template_editor_state_v1';
 
     function saveStateToStorage(state) {
@@ -57,11 +62,17 @@ const App = (() => {
         });
 
         PreviewRenderer.init('#preview-iframe', '#preview-container');
+        TemplateLibrary.init();
 
         renderComponentList();
         bindGlobalEvents();
+        bindTemplateLibraryEvents();
+        bindModalEvents();
+        bindContextMenuEvents();
         renderEditor();
         PreviewRenderer.render(initialState.blocks);
+        renderTemplateGrid();
+        generateMissingThumbnails();
     }
 
     function onStateChange(state) {
@@ -184,9 +195,608 @@ const App = (() => {
             const actionBtn = e.target.closest('.block-action-btn');
             const properties = e.target.closest('.properties-panel');
             const componentItem = e.target.closest('.component-item');
+            const contextMenu = document.getElementById('template-context-menu');
+
+            if (!contextMenu.classList.contains('hidden')) {
+                contextMenu.classList.add('hidden');
+            }
 
             if (!blockWrapper && !childWrapper && !column && !properties && !componentItem) {
                 LayoutManager.selectBlock(null, null);
+            }
+        });
+    }
+
+    function bindTemplateLibraryEvents() {
+        document.querySelectorAll('.sidebar-tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                const targetTab = tab.dataset.tab;
+                switchSidebarTab(targetTab);
+            });
+        });
+
+        document.getElementById('btn-save-as-template').addEventListener('click', function() {
+            const blocks = LayoutManager.getState().blocks;
+            if (blocks.length === 0) {
+                alert('画布为空，请先添加一些内容再保存为模板。');
+                return;
+            }
+            showSaveTemplateModal();
+        });
+
+        const searchInput = document.getElementById('template-search');
+        let searchTimeout = null;
+        searchInput.addEventListener('input', function(e) {
+            if (searchTimeout) clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(function() {
+                currentSearchKeyword = e.target.value;
+                renderTemplateGrid();
+            }, 200);
+        });
+
+        document.querySelectorAll('.category-filter-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.category-filter-btn').forEach(function(b) {
+                    b.classList.remove('active');
+                });
+                btn.classList.add('active');
+                currentCategory = btn.dataset.category;
+                renderTemplateGrid();
+            });
+        });
+    }
+
+    function switchSidebarTab(tabName) {
+        document.querySelectorAll('.sidebar-tab').forEach(function(tab) {
+            tab.classList.toggle('active', tab.dataset.tab === tabName);
+        });
+        document.querySelectorAll('.sidebar-tab-content').forEach(function(content) {
+            content.classList.toggle('active', content.dataset.tabContent === tabName);
+        });
+    }
+
+    function renderTemplateGrid() {
+        const grid = document.getElementById('template-grid');
+        const templates = TemplateLibrary.searchTemplates({
+            keyword: currentSearchKeyword,
+            category: currentCategory
+        });
+
+        if (templates.length === 0) {
+            grid.innerHTML = '<div class="template-empty">' +
+                '<div class="template-empty-icon">📭</div>' +
+                '<p>暂无模板</p>' +
+                '<p style="font-size:11px;margin-top:4px;opacity:0.8;">尝试调整筛选条件或保存新模板</p>' +
+            '</div>';
+            return;
+        }
+
+        grid.innerHTML = templates.map(function(tpl) {
+            const displayName = tpl.name.length > 10 ? tpl.name.substring(0, 10) + '...' : tpl.name;
+            const cardClass = 'template-card' + (tpl.isPreset ? ' preset' : '');
+            const tagsHtml = (tpl.tags && tpl.tags.length > 0)
+                ? '<div class="template-tags">' + tpl.tags.slice(0, 3).map(function(tag) {
+                    return '<span class="template-tag">' + escapeHtml(tag.substring(0, 6)) + '</span>';
+                }).join('') + '</div>'
+                : '';
+
+            const thumbnailContent = tpl.thumbnail
+                ? '<img src="' + tpl.thumbnail + '" alt="' + escapeHtml(tpl.name) + '" onerror="this.parentNode.innerHTML=\'<div class=\\\'thumbnail-placeholder\\\'><span>📧</span><span>加载失败</span></div>\'">'
+                : '<div class="thumbnail-placeholder" data-tpl-id="' + tpl.id + '"><span>📧</span><span>' + (tpl.isPreset ? '预设' : '自定义') + '</span></div>';
+
+            return '<div class="' + cardClass + '" data-template-id="' + tpl.id + '">' +
+                '<div class="template-thumbnail">' + thumbnailContent + '</div>' +
+                '<div class="template-info">' +
+                    '<div class="template-name" title="' + escapeHtml(tpl.name) + '">' + escapeHtml(displayName) + '</div>' +
+                    '<div class="template-meta">' +
+                        '<span class="template-category-tag">' + escapeHtml(tpl.category) + '</span>' +
+                        '<span class="template-use-count" title="使用次数">' +
+                            '<span>👁️</span><span>' + (tpl.useCount || 0) + '</span>' +
+                        '</span>' +
+                    '</div>' +
+                '</div>' +
+                tagsHtml +
+            '</div>';
+        }).join('');
+
+        grid.querySelectorAll('.template-card').forEach(function(card) {
+            const tplId = card.dataset.templateId;
+
+            card.addEventListener('click', function(e) {
+                if (e.button === 2) return;
+                showApplyTemplateConfirm(tplId);
+            });
+
+            card.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                showContextMenu(tplId, e.clientX, e.clientY);
+            });
+        });
+    }
+
+    function generateMissingThumbnails() {
+        const templates = TemplateLibrary.getAllTemplates();
+        templates.forEach(function(tpl) {
+            if (!tpl.thumbnail && !thumbnailGenerating[tpl.id]) {
+                thumbnailGenerating[tpl.id] = true;
+                const blocks = TemplateLibrary.getTemplateBlocks(tpl.id);
+                if (blocks) {
+                    TemplateLibrary.generateThumbnail(blocks).then(function(thumb) {
+                        try {
+                            TemplateLibrary.updateTemplate(tpl.id, { thumbnail: thumb });
+                        } catch (e) {}
+                        const placeholder = document.querySelector('.thumbnail-placeholder[data-tpl-id="' + tpl.id + '"]');
+                        if (placeholder) {
+                            placeholder.parentNode.innerHTML = '<img src="' + thumb + '" alt="' + escapeHtml(tpl.name) + '">';
+                        }
+                        delete thumbnailGenerating[tpl.id];
+                    });
+                } else {
+                    delete thumbnailGenerating[tpl.id];
+                }
+            }
+        });
+    }
+
+    function showApplyTemplateConfirm(tplId) {
+        const tpl = TemplateLibrary.getTemplateById(tplId);
+        if (!tpl) {
+            alert('模板不存在或已损坏');
+            renderTemplateGrid();
+            return;
+        }
+
+        const currentBlocks = LayoutManager.getState().blocks;
+        const hasContent = currentBlocks && currentBlocks.length > 0;
+
+        if (!hasContent) {
+            applyTemplate(tplId);
+            return;
+        }
+
+        const dateStr = new Date(tpl.metadata.createdAt).toLocaleDateString('zh-CN');
+        const blockCount = tpl.blocks.length;
+
+        showModal({
+            title: '应用模板',
+            body: '<p>您即将应用模板 <strong style="color:#667eea;">' + escapeHtml(tpl.metadata.name) + '</strong>。</p>' +
+                '<div class="template-preview-box">' +
+                    '<h4>模板信息</h4>' +
+                    '<div class="template-preview-meta">' +
+                        '<span>📦 组件数：' + blockCount + '</span>' +
+                        '<span>🏷️ 分类：' + escapeHtml(tpl.metadata.category) + '</span>' +
+                        '<span>📅 创建：' + dateStr + '</span>' +
+                    '</div>' +
+                '</div>' +
+                '<p style="color:#ef4444;margin-top:16px;">⚠️ 当前画布已有内容，应用模板将<strong>覆盖</strong>现有编辑内容，此操作不可撤销。</p>' +
+                '<p>确定要继续吗？</p>',
+            buttons: [
+                {
+                    text: '取消',
+                    class: 'btn-secondary',
+                    onClick: closeModal
+                },
+                {
+                    text: '确认覆盖',
+                    class: 'btn-primary',
+                    style: 'background:#667eea;color:white;',
+                    onClick: function() {
+                        closeModal();
+                        applyTemplate(tplId);
+                    }
+                }
+            ]
+        });
+    }
+
+    function applyTemplate(tplId) {
+        const blocks = TemplateLibrary.getTemplateBlocks(tplId);
+        if (!blocks) {
+            alert('模板内容加载失败');
+            return;
+        }
+
+        if (!TemplateLibrary.validateBlocks(blocks)) {
+            alert('模板数据格式无效，可能已损坏');
+            return;
+        }
+
+        const clonedBlocks = JSON.parse(JSON.stringify(blocks));
+        regenerateBlockIds(clonedBlocks);
+
+        LayoutManager.setState({
+            blocks: clonedBlocks,
+            selectedId: null,
+            selectedColId: null
+        });
+
+        TemplateLibrary.incrementUseCount(tplId);
+
+        switchSidebarTab('preview');
+        renderTemplateGrid();
+    }
+
+    function regenerateBlockIds(blocks) {
+        function newId(prefix) {
+            return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        blocks.forEach(function(block) {
+            block.id = newId('block');
+            if (block.type === 'columns' && block.data && block.data.children) {
+                block.data.children.forEach(function(col) {
+                    col.id = newId('col');
+                    if (col.blocks) {
+                        regenerateBlockIds(col.blocks);
+                    }
+                });
+            }
+        });
+    }
+
+    function showSaveTemplateModal() {
+        const blocks = LayoutManager.getState().blocks;
+
+        showModal({
+            title: '保存为模板',
+            body: '<div class="modal-form-group">' +
+                    '<label for="save-tpl-name">模板名称 *</label>' +
+                    '<input type="text" id="save-tpl-name" placeholder="给模板起个名字" maxlength="50">' +
+                '</div>' +
+                '<div class="modal-form-group">' +
+                    '<label for="save-tpl-category">分类</label>' +
+                    '<select id="save-tpl-category">' +
+                        '<option value="自定义">自定义</option>' +
+                        '<option value="营销推广">营销推广</option>' +
+                        '<option value="通知确认">通知确认</option>' +
+                        '<option value="活动邀请">活动邀请</option>' +
+                        '<option value="账户安全">账户安全</option>' +
+                    '</select>' +
+                '</div>' +
+                '<div class="modal-form-group">' +
+                    '<label>标签</label>' +
+                    '<div class="tags-input-wrapper" id="save-tpl-tags">' +
+                        '<input type="text" placeholder="输入标签后按回车添加" id="save-tpl-tag-input">' +
+                    '</div>' +
+                    '<div class="modal-form-hint">添加标签便于后续搜索，多个标签用回车分隔</div>' +
+                '</div>' +
+                '<div class="modal-form-group">' +
+                    '<div class="template-preview-box">' +
+                        '<h4>当前内容</h4>' +
+                        '<div class="template-preview-meta">' +
+                            '<span>📦 ' + blocks.length + ' 个组件</span>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>',
+            buttons: [
+                {
+                    text: '取消',
+                    class: 'btn-secondary',
+                    onClick: closeModal
+                },
+                {
+                    text: '保存模板',
+                    class: 'btn-primary',
+                    style: 'background:#667eea;color:white;',
+                    onClick: function() {
+                        handleSaveTemplate(blocks);
+                    }
+                }
+            ],
+            onMounted: initTagsInput
+        });
+    }
+
+    function initTagsInput() {
+        const tags = [];
+        const wrapper = document.getElementById('save-tpl-tags');
+        const input = document.getElementById('save-tpl-tag-input');
+
+        wrapper._tags = tags;
+
+        function renderTags() {
+            const chips = wrapper.querySelectorAll('.tag-chip');
+            chips.forEach(function(c) { c.remove(); });
+
+            tags.forEach(function(tag, idx) {
+                const chip = document.createElement('span');
+                chip.className = 'tag-chip';
+                chip.innerHTML = escapeHtml(tag) + ' <span class="tag-chip-remove" data-idx="' + idx + '">&times;</span>';
+                wrapper.insertBefore(chip, input);
+            });
+
+            wrapper.querySelectorAll('.tag-chip-remove').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const i = parseInt(btn.dataset.idx);
+                    tags.splice(i, 1);
+                    renderTags();
+                });
+            });
+        }
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                const val = input.value.trim();
+                if (val && tags.indexOf(val) === -1 && tags.length < 10) {
+                    tags.push(val.substring(0, 15));
+                    input.value = '';
+                    renderTags();
+                } else if (tags.length >= 10) {
+                    alert('最多只能添加10个标签');
+                }
+                input.value = '';
+            } else if (e.key === 'Backspace' && input.value === '' && tags.length > 0) {
+                tags.pop();
+                renderTags();
+            }
+        });
+
+        wrapper.addEventListener('click', function(e) {
+            if (e.target === wrapper || e.target === input) {
+                input.focus();
+            }
+        });
+    }
+
+    function handleSaveTemplate(blocks) {
+        const nameInput = document.getElementById('save-tpl-name');
+        const categorySelect = document.getElementById('save-tpl-category');
+        const tagsWrapper = document.getElementById('save-tpl-tags');
+
+        const name = nameInput.value.trim();
+        const category = categorySelect.value;
+        const tags = tagsWrapper._tags || [];
+
+        if (!name) {
+            nameInput.focus();
+            nameInput.style.borderColor = '#ef4444';
+            setTimeout(function() { nameInput.style.borderColor = ''; }, 2000);
+            return;
+        }
+
+        closeModal();
+
+        const statusEl = document.createElement('div');
+        statusEl.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:20px 32px;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.2);z-index:30000;font-size:14px;color:#374151;display:flex;align-items:center;gap:10px;';
+        statusEl.innerHTML = '<span style="font-size:20px;">⏳</span><span>正在生成缩略图...</span>';
+        document.body.appendChild(statusEl);
+
+        TemplateLibrary.generateThumbnail(blocks).then(function(thumbnail) {
+            try {
+                const result = TemplateLibrary.createTemplate({
+                    name: name,
+                    category: category,
+                    tags: tags,
+                    blocks: blocks,
+                    thumbnail: thumbnail
+                });
+
+                statusEl.innerHTML = '<span style="font-size:20px;">✅</span><span>模板保存成功！</span>';
+                renderTemplateGrid();
+
+                setTimeout(function() {
+                    if (statusEl.parentNode) statusEl.parentNode.removeChild(statusEl);
+                }, 1500);
+            } catch (e) {
+                statusEl.innerHTML = '<span style="font-size:20px;">❌</span><span>' + escapeHtml(e.message || '保存失败') + '</span>';
+                setTimeout(function() {
+                    if (statusEl.parentNode) statusEl.parentNode.removeChild(statusEl);
+                }, 2500);
+            }
+        });
+    }
+
+    function showContextMenu(tplId, x, y) {
+        contextMenuTemplateId = tplId;
+        const menu = document.getElementById('template-context-menu');
+        const tpl = TemplateLibrary.getTemplateById(tplId);
+        const isPreset = tpl && tpl.metadata && tpl.metadata.isPreset;
+
+        menu.querySelectorAll('[data-only-custom="true"]').forEach(function(el) {
+            el.classList.toggle('hidden', isPreset);
+        });
+
+        menu.classList.remove('hidden');
+
+        const rect = menu.getBoundingClientRect();
+        const viewportW = window.innerWidth;
+        const viewportH = window.innerHeight;
+
+        let finalX = x;
+        let finalY = y;
+
+        if (x + rect.width > viewportW - 10) {
+            finalX = viewportW - rect.width - 10;
+        }
+        if (y + rect.height > viewportH - 10) {
+            finalY = viewportH - rect.height - 10;
+        }
+
+        menu.style.left = finalX + 'px';
+        menu.style.top = finalY + 'px';
+    }
+
+    function bindContextMenuEvents() {
+        const menu = document.getElementById('template-context-menu');
+
+        menu.querySelectorAll('.context-menu-item').forEach(function(item) {
+            item.addEventListener('click', function() {
+                const action = item.dataset.action;
+                const tplId = contextMenuTemplateId;
+                menu.classList.add('hidden');
+
+                if (!tplId) return;
+
+                switch (action) {
+                    case 'apply':
+                        showApplyTemplateConfirm(tplId);
+                        break;
+                    case 'rename':
+                        showRenameTemplateModal(tplId);
+                        break;
+                    case 'export':
+                        exportTemplate(tplId);
+                        break;
+                    case 'delete':
+                        showDeleteTemplateConfirm(tplId);
+                        break;
+                }
+            });
+        });
+    }
+
+    function showRenameTemplateModal(tplId) {
+        const tpl = TemplateLibrary.getTemplateById(tplId);
+        if (!tpl) return;
+
+        showModal({
+            title: '重命名模板',
+            body: '<div class="modal-form-group">' +
+                    '<label for="rename-tpl-name">模板名称 *</label>' +
+                    '<input type="text" id="rename-tpl-name" value="' + escapeHtml(tpl.metadata.name) + '" maxlength="50">' +
+                '</div>' +
+                '<div class="modal-form-group">' +
+                    '<label for="rename-tpl-category">分类</label>' +
+                    '<select id="rename-tpl-category">' +
+                        '<option value="自定义"' + (tpl.metadata.category === '自定义' ? ' selected' : '') + '>自定义</option>' +
+                        '<option value="营销推广"' + (tpl.metadata.category === '营销推广' ? ' selected' : '') + '>营销推广</option>' +
+                        '<option value="通知确认"' + (tpl.metadata.category === '通知确认' ? ' selected' : '') + '>通知确认</option>' +
+                        '<option value="活动邀请"' + (tpl.metadata.category === '活动邀请' ? ' selected' : '') + '>活动邀请</option>' +
+                        '<option value="账户安全"' + (tpl.metadata.category === '账户安全' ? ' selected' : '') + '>账户安全</option>' +
+                    '</select>' +
+                '</div>',
+            buttons: [
+                {
+                    text: '取消',
+                    class: 'btn-secondary',
+                    onClick: closeModal
+                },
+                {
+                    text: '确认修改',
+                    class: 'btn-primary',
+                    style: 'background:#667eea;color:white;',
+                    onClick: function() {
+                        const newName = document.getElementById('rename-tpl-name').value.trim();
+                        const newCategory = document.getElementById('rename-tpl-category').value;
+                        if (!newName) {
+                            alert('模板名称不能为空');
+                            return;
+                        }
+                        try {
+                            TemplateLibrary.updateTemplate(tplId, { name: newName, category: newCategory });
+                            closeModal();
+                            renderTemplateGrid();
+                        } catch (e) {
+                            alert(e.message || '修改失败');
+                        }
+                    }
+                }
+            ]
+        });
+    }
+
+    function showDeleteTemplateConfirm(tplId) {
+        const tpl = TemplateLibrary.getTemplateById(tplId);
+        if (!tpl) return;
+
+        showModal({
+            title: '删除模板',
+            body: '<p>确定要删除模板 <strong style="color:#ef4444;">' + escapeHtml(tpl.metadata.name) + '</strong> 吗？</p>' +
+                '<p style="color:#ef4444;margin-top:12px;">⚠️ 此操作不可撤销，删除后无法恢复。</p>',
+            buttons: [
+                {
+                    text: '取消',
+                    class: 'btn-secondary',
+                    onClick: closeModal
+                },
+                {
+                    text: '确认删除',
+                    class: 'btn-primary',
+                    style: 'background:#ef4444;color:white;',
+                    onClick: function() {
+                        try {
+                            TemplateLibrary.deleteTemplate(tplId);
+                            closeModal();
+                            renderTemplateGrid();
+                        } catch (e) {
+                            alert(e.message || '删除失败');
+                        }
+                    }
+                }
+            ]
+        });
+    }
+
+    function exportTemplate(tplId) {
+        const jsonStr = TemplateLibrary.exportTemplate(tplId);
+        if (!jsonStr) {
+            alert('导出失败：模板不存在');
+            return;
+        }
+
+        const tpl = TemplateLibrary.getTemplateById(tplId);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = (tpl.metadata.name || 'template').replace(/[^\w\u4e00-\u9fa5-]/g, '_');
+        a.download = 'template_' + safeName + '_' + Date.now() + '.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function showModal(options) {
+        const overlay = document.getElementById('template-modal-overlay');
+        const titleEl = document.getElementById('modal-title');
+        const bodyEl = document.getElementById('modal-body');
+        const footerEl = document.getElementById('modal-footer');
+
+        titleEl.textContent = options.title || '提示';
+        bodyEl.innerHTML = options.body || '';
+
+        const buttons = options.buttons || [{ text: '确定', class: 'btn-primary', style: 'background:#667eea;color:white;', onClick: closeModal }];
+        footerEl.innerHTML = buttons.map(function(btn, idx) {
+            const style = btn.style ? ' style="' + btn.style + '"' : '';
+            return '<button class="btn ' + (btn.class || 'btn-secondary') + '" data-btn-idx="' + idx + '"' + style + '>' + btn.text + '</button>';
+        }).join('');
+
+        footerEl.querySelectorAll('button').forEach(function(btnEl) {
+            const idx = parseInt(btnEl.dataset.btnIdx);
+            btnEl.addEventListener('click', buttons[idx].onClick);
+        });
+
+        overlay.classList.remove('hidden');
+
+        if (options.onMounted) {
+            setTimeout(options.onMounted, 10);
+        }
+    }
+
+    function closeModal() {
+        document.getElementById('template-modal-overlay').classList.add('hidden');
+    }
+
+    function bindModalEvents() {
+        document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+        document.getElementById('template-modal-overlay').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const overlay = document.getElementById('template-modal-overlay');
+                if (!overlay.classList.contains('hidden')) {
+                    closeModal();
+                }
+                const ctxMenu = document.getElementById('template-context-menu');
+                if (!ctxMenu.classList.contains('hidden')) {
+                    ctxMenu.classList.add('hidden');
+                }
             }
         });
     }
@@ -707,6 +1317,13 @@ const App = (() => {
                 });
             }
         });
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        var div = document.createElement('div');
+        div.textContent = String(str);
+        return div.innerHTML;
     }
 
     return { init: init };

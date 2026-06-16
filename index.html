@@ -39,24 +39,68 @@
         </section>
 
         <aside class="sidebar-right">
-            <div class="preview-toolbar">
-                <span class="toolbar-title">实时预览</span>
-                <div class="view-toggle">
-                    <button id="btn-view-desktop" class="btn btn-small btn-toggle active" data-view="desktop">
-                        💻 桌面
-                    </button>
-                    <button id="btn-view-mobile" class="btn btn-small btn-toggle" data-view="mobile">
-                        📱 手机
-                    </button>
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" data-tab="preview">
+                    <span class="tab-icon">👁️</span>
+                    <span class="tab-label">预览</span>
+                </button>
+                <button class="sidebar-tab" data-tab="templates">
+                    <span class="tab-icon">📚</span>
+                    <span class="tab-label">模板库</span>
+                </button>
+                <button class="sidebar-tab" data-tab="properties">
+                    <span class="tab-icon">⚙️</span>
+                    <span class="tab-label">属性</span>
+                </button>
+            </div>
+
+            <div class="sidebar-tab-content active" data-tab-content="preview">
+                <div class="preview-toolbar">
+                    <span class="toolbar-title">实时预览</span>
+                    <div class="view-toggle">
+                        <button id="btn-view-desktop" class="btn btn-small btn-toggle active" data-view="desktop">
+                            💻 桌面
+                        </button>
+                        <button id="btn-view-mobile" class="btn btn-small btn-toggle" data-view="mobile">
+                            📱 手机
+                        </button>
+                    </div>
+                </div>
+                <div id="preview-container" class="preview-container view-desktop">
+                    <iframe id="preview-iframe" class="preview-iframe"></iframe>
                 </div>
             </div>
-            <div id="preview-container" class="preview-container view-desktop">
-                <iframe id="preview-iframe" class="preview-iframe"></iframe>
+
+            <div class="sidebar-tab-content" data-tab-content="templates">
+                <div class="template-library-header">
+                    <div class="template-library-actions">
+                        <button id="btn-save-as-template" class="btn btn-small btn-primary" style="background:#667eea;color:white;">
+                            💾 保存为模板
+                        </button>
+                    </div>
+                    <div class="template-search-box">
+                        <input type="text" id="template-search" placeholder="🔍 搜索模板名称或标签...">
+                    </div>
+                    <div class="template-category-filter">
+                        <button class="category-filter-btn active" data-category="全部">全部</button>
+                        <button class="category-filter-btn" data-category="预设模板">预设</button>
+                        <button class="category-filter-btn" data-category="营销推广">营销</button>
+                        <button class="category-filter-btn" data-category="通知确认">通知</button>
+                        <button class="category-filter-btn" data-category="活动邀请">邀请</button>
+                        <button class="category-filter-btn" data-category="账户安全">安全</button>
+                        <button class="category-filter-btn" data-category="自定义">自定义</button>
+                    </div>
+                </div>
+                <div id="template-grid" class="template-grid">
+                </div>
             </div>
-            <div class="properties-panel">
-                <h3>属性面板</h3>
-                <div id="properties-content" class="properties-content">
-                    <p class="empty-hint">点击组件编辑属性</p>
+
+            <div class="sidebar-tab-content" data-tab-content="properties">
+                <div class="properties-panel" style="border-top:none;height:100%;">
+                    <h3>属性面板</h3>
+                    <div id="properties-content" class="properties-content">
+                        <p class="empty-hint">点击组件编辑属性</p>
+                    </div>
                 </div>
             </div>
         </aside>
@@ -68,6 +112,40 @@
     <script src="js/layout.js"></script>
     <script src="js/preview.js"></script>
     <script src="js/io.js"></script>
+    <script src="js/templateLibrary.js"></script>
     <script src="js/app.js"></script>
+
+    <div id="template-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">提示</h3>
+                <button class="modal-close-btn" id="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body">
+            </div>
+            <div class="modal-footer" id="modal-footer">
+            </div>
+        </div>
+    </div>
+
+    <div id="template-context-menu" class="context-menu hidden">
+        <div class="context-menu-item" data-action="apply">
+            <span class="context-menu-icon">📋</span>
+            <span class="context-menu-label">应用模板</span>
+        </div>
+        <div class="context-menu-item" data-action="rename" data-only-custom="true">
+            <span class="context-menu-icon">✏️</span>
+            <span class="context-menu-label">重命名</span>
+        </div>
+        <div class="context-menu-item" data-action="export">
+            <span class="context-menu-icon">📤</span>
+            <span class="context-menu-label">导出模板</span>
+        </div>
+        <div class="context-menu-divider" data-only-custom="true"></div>
+        <div class="context-menu-item context-menu-danger" data-action="delete" data-only-custom="true">
+            <span class="context-menu-icon">🗑️</span>
+            <span class="context-menu-label">删除模板</span>
+        </div>
+    </div>
 </body>
 </html>

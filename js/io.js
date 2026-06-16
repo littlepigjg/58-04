@@ -47,9 +47,17 @@ const IOManager = (() => {
                         reject(new Error('JSON格式不正确：缺少blocks数组'));
                         return;
                     }
+                    if (window.TemplateLibrary && !TemplateLibrary.validateBlocks(data.blocks)) {
+                        reject(new Error('JSON数据校验失败：blocks结构不合法，文件可能已损坏'));
+                        return;
+                    }
                     resolve(data);
                 } catch (err) {
-                    reject(new Error('JSON解析失败：' + err.message));
+                    if (err instanceof SyntaxError) {
+                        reject(new Error('JSON解析失败：文件格式不是有效的JSON'));
+                    } else {
+                        reject(err);
+                    }
                 }
             };
             reader.onerror = () => reject(new Error('读取文件失败'));
