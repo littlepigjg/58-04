@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>离线邮件模板编辑器</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <header class="app-header">
+        <h1>📧 邮件模板编辑器</h1>
+        <div class="header-actions">
+            <button id="btn-import-json" class="btn btn-secondary">📂 导入JSON</button>
+            <button id="btn-export-json" class="btn btn-secondary">💾 保存JSON</button>
+            <button id="btn-export-html" class="btn btn-primary">📤 导出HTML</button>
+            <input type="file" id="file-import" accept=".json" style="display:none">
+        </div>
+    </header>
+
+    <main class="app-main">
+        <aside class="sidebar-left">
+            <h2>组件库</h2>
+            <div id="component-list" class="component-list"></div>
+            <div style="padding:12px;border-top:1px solid #e5e7eb;margin-top:12px;">
+                <button id="btn-reset-storage" class="btn btn-small btn-danger" style="width:100%;">🔄 重置本地缓存</button>
+            </div>
+        </aside>
+
+        <section class="editor-area">
+            <div class="editor-toolbar">
+                <span class="toolbar-title">编辑区</span>
+                <button id="btn-clear" class="btn btn-small btn-danger">清空</button>
+            </div>
+            <div id="editor-canvas" class="editor-canvas">
+                <div class="empty-hint">
+                    <p>👈 从左侧拖拽组件到这里开始编辑</p>
+                </div>
+            </div>
+        </section>
+
+        <aside class="sidebar-right">
+            <div class="preview-toolbar">
+                <span class="toolbar-title">实时预览</span>
+                <div class="view-toggle">
+                    <button id="btn-view-desktop" class="btn btn-small btn-toggle active" data-view="desktop">
+                        💻 桌面
+                    </button>
+                    <button id="btn-view-mobile" class="btn btn-small btn-toggle" data-view="mobile">
+                        📱 手机
+                    </button>
+                </div>
+            </div>
+            <div id="preview-container" class="preview-container view-desktop">
+                <iframe id="preview-iframe" class="preview-iframe"></iframe>
+            </div>
+            <div class="properties-panel">
+                <h3>属性面板</h3>
+                <div id="properties-content" class="properties-content">
+                    <p class="empty-hint">点击组件编辑属性</p>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script src="js/components.js"></script>
+    <script src="js/templateEngine.js"></script>
+    <script src="js/blockList.js"></script>
+    <script src="js/layout.js"></script>
+    <script src="js/preview.js"></script>
+    <script src="js/io.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
